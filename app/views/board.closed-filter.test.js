@@ -42,24 +42,22 @@ function createTestIssueStores() {
   };
 }
 
-describe('views/board closed filter', () => {
-  test('filters closed issues by timeframe and sorts by closed_at', async () => {
+describe('views/board done column', () => {
+  test('renders all closed issues sorted by closed_at', async () => {
     document.body.innerHTML = '<div id="m"></div>';
     const mount = /** @type {HTMLElement} */ (document.getElementById('m'));
 
     const now = Date.now();
-    const oneDay = 24 * 60 * 60 * 1000;
-
     const issues = [
       {
         id: 'C-1',
         title: 'four days',
-        closed_at: new Date(now - 4 * oneDay).getTime()
+        closed_at: new Date(now - 4 * 24 * 60 * 60 * 1000).getTime()
       },
       {
         id: 'C-2',
         title: 'yesterday',
-        closed_at: new Date(now - 1 * oneDay).getTime()
+        closed_at: new Date(now - 1 * 24 * 60 * 60 * 1000).getTime()
       },
       { id: 'C-3', title: 'today', closed_at: new Date(now).getTime() }
     ];
@@ -81,30 +79,11 @@ describe('views/board closed filter', () => {
     );
     await view.load();
 
-    // Default filter: Today → only C-3 visible
-    let closed_ids = Array.from(
+    const closed_ids = Array.from(
       mount.querySelectorAll('#closed-col .board-card .mono')
     ).map((el) => el.textContent?.trim());
-    expect(closed_ids).toEqual(['C-3']);
 
-    // Change to Last 3 days → C-3 (today) and C-2 (yesterday)
-    const select = /** @type {HTMLSelectElement} */ (
-      mount.querySelector('#closed-filter')
-    );
-    select.value = '3';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-
-    closed_ids = Array.from(
-      mount.querySelectorAll('#closed-col .board-card .mono')
-    ).map((el) => el.textContent?.trim());
-    expect(closed_ids).toEqual(['C-3', 'C-2']);
-
-    // Change to Last 7 days → all three, sorted by closed_at desc
-    select.value = '7';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-    closed_ids = Array.from(
-      mount.querySelectorAll('#closed-col .board-card .mono')
-    ).map((el) => el.textContent?.trim());
     expect(closed_ids).toEqual(['C-3', 'C-2', 'C-1']);
+    expect(mount.querySelector('#closed-filter')).toBeNull();
   });
 });

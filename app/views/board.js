@@ -3,9 +3,7 @@ import { createListSelectors } from '../data/list-selectors.js';
 import { cmpClosedDesc, cmpPriorityThenCreated } from '../data/sort.js';
 import { createIssueIdRenderer } from '../utils/issue-id-renderer.js';
 import { debug } from '../utils/logging.js';
-import { createPriorityBadge } from '../utils/priority-badge.js';
 import { showToast } from '../utils/toast.js';
-import { createTypeBadge } from '../utils/type-badge.js';
 
 /**
  * @typedef {{
@@ -16,7 +14,10 @@ import { createTypeBadge } from '../utils/type-badge.js';
  *   issue_type?: string,
  *   created_at?: number,
  *   updated_at?: number,
- *   closed_at?: number
+ *   closed_at?: number,
+ *   parent?: string,
+ *   parent_title?: string,
+ *   dependencies?: Array<{ depends_on_id?: string, type?: string }>
  * }} IssueLite
  */
 
@@ -26,18 +27,17 @@ import { createTypeBadge } from '../utils/type-badge.js';
  * @type {Record<string, 'open'|'in_progress'|'closed'>}
  */
 const COLUMN_STATUS_MAP = {
-  'blocked-col': 'open',
   'ready-col': 'open',
   'in-progress-col': 'in_progress',
   'closed-col': 'closed'
 };
 
 /**
- * Create the Board view with Blocked, Ready, In progress, Closed.
+ * Create the Board view with To Do, In Progress, Done.
  * Push-only: derives items from per-subscription stores.
  *
  * Sorting rules:
- * - Ready/Blocked/In progress: priority asc, then created_at asc.
+ * - To Do/In Progress: priority asc, then created_at asc.
  * - Closed: closed_at desc.
  *
  * @param {HTMLElement} mount_element
@@ -60,47 +60,158 @@ export function createBoardView(
 ) {
   const log = debug('views:board');
   /** @type {IssueLite[]} */
-  let list_ready = [];
-  /** @type {IssueLite[]} */
-  let list_blocked = [];
+  let list_to_do = [];
   /** @type {IssueLite[]} */
   let list_in_progress = [];
   /** @type {IssueLite[]} */
   let list_closed = [];
   /** @type {IssueLite[]} */
   let list_closed_raw = [];
+  /** @type {IssueLite[]} */
+  let list_epics = [];
+  /** @type {Map<string, string>} */
+  let epic_title_by_id = new Map();
+  /** @type {string} */
+  let search_text = '';
+  /** @type {'default'|'recent'|'priority'} */
+  let active_filter = 'default';
   // Centralized selection helpers
   const selectors = issueStores ? createListSelectors(issueStores) : null;
 
   /**
-   * Closed column filter mode.
-   * 'today' → items with closed_at since local day start
-   * '3' → last 3 days; '7' → last 7 days
-   *
-   * @type {'today'|'3'|'7'}
+   * @param {Event} ev
    */
-  let closed_filter_mode = 'today';
-  if (store) {
-    try {
-      const s = store.getState();
-      const cf =
-        s && s.board ? String(s.board.closed_filter || 'today') : 'today';
-      if (cf === 'today' || cf === '3' || cf === '7') {
-        closed_filter_mode = /** @type {any} */ (cf);
-      }
-    } catch {
-      // ignore store init errors
+  function onSearchInput(ev) {
+    const input = /** @type {HTMLInputElement} */ (ev.currentTarget);
+    search_text = input.value;
+    doRender();
+  }
+
+  /**
+   * @param {'default'|'recent'|'priority'} filter
+   */
+  function onFilterClick(filter) {
+    active_filter = active_filter === filter ? 'default' : filter;
+    doRender();
+  }
+
+  /**
+   * @param {IssueLite[]} items
+   * @returns {IssueLite[]}
+   */
+  function filterBySearch(items) {
+    if (!search_text) return items;
+    const needle = search_text.toLowerCase();
+    return items.filter((it) => {
+      const a = String(it.id).toLowerCase();
+      const b = String(it.title || '').toLowerCase();
+      return a.includes(needle) || b.includes(needle);
+    });
+  }
+
+  /**
+   * @param {IssueLite[]} items
+   * @returns {IssueLite[]}
+   */
+  function applyFilter(items) {
+    if (active_filter === 'default') return items;
+    const sorted = [...items];
+    if (active_filter === 'recent') {
+      sorted.sort((a, b) => (b.updated_at || b.created_at || 0) - (a.updated_at || a.created_at || 0));
+    } else if (active_filter === 'priority') {
+      sorted.sort((a, b) => (a.priority || 5) - (b.priority || 5));
     }
+    return sorted;
   }
 
   function template() {
     return html`
-      <div class="panel__body board-root">
-        ${columnTemplate('Blocked', 'blocked-col', list_blocked)}
-        ${columnTemplate('Ready', 'ready-col', list_ready)}
-        ${columnTemplate('In Progress', 'in-progress-col', list_in_progress)}
-        ${columnTemplate('Closed', 'closed-col', list_closed)}
+      <div class="panel__body jira-board-shell">
+        ${sidebarTemplate()}
+        <main class="jira-board-main">
+          <div class="jira-board-content">
+            <div class="jira-breadcrumbs" aria-label="Breadcrumb">
+              <span>Projects</span>
+              <span aria-hidden="true">/</span>
+              <span>Beyond Gravity</span>
+            </div>
+            <div class="jira-board-title-row">
+              <h2>Board</h2>
+            </div>
+            <div class="jira-board-toolbar" aria-label="Board filters">
+              <label class="jira-board-search">
+                <span aria-hidden="true"></span>
+                <input type="search" aria-label="Search board" placeholder="Search cards…" .value=${search_text} @input=${onSearchInput} />
+              </label>
+              <button class="jira-toolbar-button ${active_filter === 'recent' ? 'is-active' : ''}" type="button" @click=${() => onFilterClick('recent')}>
+                Recent
+              </button>
+              <button class="jira-toolbar-button ${active_filter === 'priority' ? 'is-active' : ''}" type="button" @click=${() => onFilterClick('priority')}>
+                Priority
+              </button>
+            </div>
+            <div class="board-root">
+              ${columnTemplate('TO DO', 'ready-col', applyFilter(filterBySearch(list_to_do)))}
+              ${columnTemplate(
+                'IN PROGRESS',
+                'in-progress-col',
+                applyFilter(filterBySearch(list_in_progress))
+              )}
+              ${columnTemplate('DONE', 'closed-col', applyFilter(filterBySearch(list_closed)))}
+            </div>
+          </div>
+        </main>
       </div>
+    `;
+  }
+
+  function sidebarTemplate() {
+    return html`
+      <aside class="jira-sidebar" aria-label="Project navigation">
+        <div class="jira-project">
+          <div class="jira-project__icon" aria-hidden="true"></div>
+          <div>
+            <div class="jira-project__name">Beyond Gravity</div>
+            <div class="jira-project__type">Software project</div>
+          </div>
+        </div>
+        <nav class="jira-sidebar-nav" aria-label="Project">
+          <div class="jira-sidebar-section">PLANNING</div>
+          ${sidebarItemTemplate('roadmap', 'Roadmap', false)}
+          ${sidebarItemTemplate('backlog', 'Backlog', false)}
+          ${sidebarItemTemplate('board', 'Board', true)}
+          ${sidebarItemTemplate('reports', 'Reports', false)}
+          ${sidebarItemTemplate('issues', 'Issues', false)}
+          <div class="jira-sidebar-section">DEVELOPMENT</div>
+          ${sidebarItemTemplate('code', 'Code', false)}
+          ${sidebarItemTemplate('security', 'Security', false)}
+          ${sidebarItemTemplate('releases', 'Releases', false)}
+        </nav>
+        <div class="jira-sidebar-footer">
+          ${sidebarItemTemplate('settings', 'Project settings', false)}
+        </div>
+      </aside>
+    `;
+  }
+
+  /**
+   * @param {string} icon
+   * @param {string} label
+   * @param {boolean} active
+   */
+  function sidebarItemTemplate(icon, label, active) {
+    return html`
+      <a
+        class="jira-sidebar-item ${active ? 'is-active' : ''}"
+        href="#/board"
+        aria-current=${active ? 'page' : 'false'}
+      >
+        <span
+          class="jira-sidebar-item__icon jira-sidebar-item__icon--${icon}"
+          aria-hidden="true"
+        ></span>
+        <span>${label}</span>
+      </a>
     `;
   }
 
@@ -112,6 +223,10 @@ export function createBoardView(
   function columnTemplate(title, id, items) {
     const item_count = Array.isArray(items) ? items.length : 0;
     const count_label = item_count === 1 ? '1 issue' : `${item_count} issues`;
+    const done_icon =
+      id === 'closed-col'
+        ? html`<span class="board-column__done-icon" aria-hidden="true"></span>`
+        : '';
     return html`
       <section class="board-column" id=${id}>
         <header
@@ -122,33 +237,11 @@ export function createBoardView(
         >
           <div class="board-column__title">
             <span class="board-column__title-text">${title}</span>
+            ${done_icon}
             <span class="badge board-column__count" aria-label=${count_label}>
               ${item_count}
             </span>
           </div>
-          ${id === 'closed-col'
-            ? html`<label class="board-closed-filter">
-                <span class="visually-hidden">Filter closed issues</span>
-                <select
-                  id="closed-filter"
-                  aria-label="Filter closed issues"
-                  @change=${onClosedFilterChange}
-                >
-                  <option
-                    value="today"
-                    ?selected=${closed_filter_mode === 'today'}
-                  >
-                    Today
-                  </option>
-                  <option value="3" ?selected=${closed_filter_mode === '3'}>
-                    Last 3 days
-                  </option>
-                  <option value="7" ?selected=${closed_filter_mode === '7'}>
-                    Last 7 days
-                  </option>
-                </select>
-              </label>`
-            : ''}
         </header>
         <div
           class="board-column__body"
@@ -162,9 +255,27 @@ export function createBoardView(
   }
 
   /**
+   * @param {number|undefined} ts - Unix timestamp in ms (or seconds)
+   * @returns {string}
+   */
+  function formatAge(ts) {
+    if (!ts) return '';
+    // Normalize seconds to ms
+    const ms = ts < 1e12 ? ts * 1000 : ts;
+    const days = Math.floor((Date.now() - ms) / 86400000);
+    if (days < 1) return 'today';
+    if (days === 1) return '1d ago';
+    if (days < 30) return `${days}d ago`;
+    return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+
+  /**
    * @param {IssueLite} it
    */
   function cardTemplate(it) {
+    const epic_title = epicTitleForIssue(it);
+    const age = formatAge(it.updated_at || it.created_at);
+    const pri = it.priority != null ? `P${it.priority}` : '';
     return html`
       <article
         class="board-card"
@@ -179,12 +290,86 @@ export function createBoardView(
         <div class="board-card__title text-truncate">
           ${it.title || '(no title)'}
         </div>
+        ${epic_title
+          ? html`<span
+              class="jira-card-label jira-card-label--epic"
+              title=${epic_title}
+            >
+              ${epic_title}
+            </span>`
+          : ''}
         <div class="board-card__meta">
-          ${createTypeBadge(it.issue_type)} ${createPriorityBadge(it.priority)}
+          <span class="jira-issue-icon" aria-hidden="true"></span>
           ${createIssueIdRenderer(it.id, { class_name: 'mono' })}
+          <span class="board-card__age">${age}</span>
+          ${pri ? html`<span class="board-card__priority">${pri}</span>` : ''}
         </div>
       </article>
     `;
+  }
+
+  /**
+   * @param {IssueLite} issue
+   */
+  function epicTitleForIssue(issue) {
+    if (
+      typeof issue.parent_title === 'string' &&
+      issue.parent_title.length > 0
+    ) {
+      return cleanEpicTitle(issue.parent_title);
+    }
+    const parent_id = parentIdForIssue(issue);
+    if (!parent_id) {
+      return '';
+    }
+    const title = epic_title_by_id.get(parent_id);
+    if (title) {
+      return cleanEpicTitle(title);
+    }
+    return parent_id;
+  }
+
+  /**
+   * @param {IssueLite} issue
+   */
+  function parentIdForIssue(issue) {
+    if (typeof issue.parent === 'string' && issue.parent.length > 0) {
+      return issue.parent;
+    }
+    const deps = Array.isArray(issue.dependencies) ? issue.dependencies : [];
+    const parent_dep = deps.find(
+      (dep) => dep && dep.type === 'parent-child' && dep.depends_on_id
+    );
+    return parent_dep?.depends_on_id || '';
+  }
+
+  /**
+   * @param {string} title
+   */
+  function cleanEpicTitle(title) {
+    return title.replace(/^EPIC:\s*/i, '').trim();
+  }
+
+  function rebuildEpicTitleLookup() {
+    /** @type {Map<string, string>} */
+    const next = new Map();
+    const all_items = [
+      ...list_epics,
+      ...list_to_do,
+      ...list_in_progress,
+      ...list_closed_raw
+    ];
+    for (const item of all_items) {
+      if (
+        item &&
+        item.id &&
+        item.issue_type === 'epic' &&
+        typeof item.title === 'string'
+      ) {
+        next.set(item.id, item.title);
+      }
+    }
+    epic_title_by_id = next;
   }
 
   /** @type {string|null} */
@@ -511,64 +696,27 @@ export function createBoardView(
   // Sort helpers centralized in app/data/sort.js
 
   /**
-   * Recompute closed list from raw using the current filter and sort.
+   * Recompute closed list from raw and sort all done items.
    */
-  function applyClosedFilter() {
-    log('applyClosedFilter %s', closed_filter_mode);
-    /** @type {IssueLite[]} */
-    let items = Array.isArray(list_closed_raw) ? [...list_closed_raw] : [];
-    const now = new Date();
-    let since_ts = 0;
-    if (closed_filter_mode === 'today') {
-      const start = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate(),
-        0,
-        0,
-        0,
-        0
-      );
-      since_ts = start.getTime();
-    } else if (closed_filter_mode === '3') {
-      since_ts = now.getTime() - 3 * 24 * 60 * 60 * 1000;
-    } else if (closed_filter_mode === '7') {
-      since_ts = now.getTime() - 7 * 24 * 60 * 60 * 1000;
-    }
-    items = items.filter((it) => {
-      const s = Number.isFinite(it.closed_at)
-        ? /** @type {number} */ (it.closed_at)
-        : NaN;
-      if (!Number.isFinite(s)) {
-        return false;
-      }
-      return s >= since_ts;
-    });
+  function applyClosedList() {
+    log('applyClosedList');
+    const items = Array.isArray(list_closed_raw) ? [...list_closed_raw] : [];
     items.sort(cmpClosedDesc);
     list_closed = items;
   }
 
   /**
-   * @param {Event} ev
+   * @param {IssueLite[]} items
    */
-  function onClosedFilterChange(ev) {
-    try {
-      const el = /** @type {HTMLSelectElement} */ (ev.target);
-      const v = String(el.value || 'today');
-      closed_filter_mode = v === '3' || v === '7' ? v : 'today';
-      log('closed filter %s', closed_filter_mode);
-      if (store) {
-        try {
-          store.setState({ board: { closed_filter: closed_filter_mode } });
-        } catch {
-          // ignore store errors
-        }
+  function uniqueById(items) {
+    /** @type {Map<string, IssueLite>} */
+    const by_id = new Map();
+    for (const item of items) {
+      if (item && item.id && !by_id.has(item.id)) {
+        by_id.set(item.id, item);
       }
-      applyClosedFilter();
-      doRender();
-    } catch {
-      // ignore
     }
+    return Array.from(by_id.values());
   }
 
   /**
@@ -593,24 +741,30 @@ export function createBoardView(
           'tab:board:closed',
           'closed'
         );
+        const epics = selectors.selectBoardColumn('tab:board:epics', 'ready');
 
-        // Ready excludes items that are in progress
+        // To Do is all open work: blocked plus ready, excluding in-progress.
         /** @type {Set<string>} */
         const in_prog_ids = new Set(in_progress.map((i) => i.id));
-        const ready = ready_raw.filter((i) => !in_prog_ids.has(i.id));
+        const to_do = uniqueById([...blocked, ...ready_raw]).filter(
+          (i) => !in_prog_ids.has(i.id)
+        );
+        to_do.sort(cmpPriorityThenCreated);
 
-        list_ready = ready;
-        list_blocked = blocked;
+        list_to_do = to_do;
         list_in_progress = in_progress;
         list_closed_raw = closed;
+        list_epics = epics;
       }
-      applyClosedFilter();
+      applyClosedList();
+      rebuildEpicTitleLookup();
       doRender();
     } catch {
-      list_ready = [];
-      list_blocked = [];
+      list_to_do = [];
       list_in_progress = [];
       list_closed = [];
+      list_epics = [];
+      rebuildEpicTitleLookup();
       doRender();
     }
   }
@@ -692,20 +846,21 @@ export function createBoardView(
             ? closed_raw.map((it) => it)
             : [];
 
-          // Remove items from Ready that are already In Progress
+          // To Do is all open work: blocked plus ready, excluding in-progress.
           /** @type {Set<string>} */
           const in_progress_ids = new Set(in_prog.map((i) => i.id));
-          ready = ready.filter((i) => !in_progress_ids.has(i.id));
+          const to_do = uniqueById([...blocked, ...ready]).filter(
+            (i) => !in_progress_ids.has(i.id)
+          );
 
           // Sort as per column rules
-          ready.sort(cmpPriorityThenCreated);
-          blocked.sort(cmpPriorityThenCreated);
+          to_do.sort(cmpPriorityThenCreated);
           in_prog.sort(cmpPriorityThenCreated);
-          list_ready = ready;
-          list_blocked = blocked;
+          list_to_do = to_do;
           list_in_progress = in_prog;
           list_closed_raw = closed;
-          applyClosedFilter();
+          applyClosedList();
+          rebuildEpicTitleLookup();
           doRender();
         }
       } catch {
@@ -714,10 +869,11 @@ export function createBoardView(
     },
     clear() {
       mount_element.replaceChildren();
-      list_ready = [];
-      list_blocked = [];
+      list_to_do = [];
       list_in_progress = [];
       list_closed = [];
+      list_epics = [];
+      rebuildEpicTitleLookup();
     }
   };
 }

@@ -163,4 +163,43 @@ describe('views/detail edits', () => {
     await vi.advanceTimersByTimeAsync(3000);
     vi.useRealTimers();
   });
+
+  test('keeps description in read mode when text is selected', async () => {
+    document.body.innerHTML =
+      '<section class="panel"><div id="mount"></div></section>';
+    const mount = /** @type {HTMLElement} */ (document.getElementById('mount'));
+    const initial = {
+      id: 'UI-10',
+      title: 'T',
+      description: 'Selectable description',
+      status: 'open',
+      priority: 2
+    };
+    const stores = {
+      /** @param {string} id */
+      snapshotFor(id) {
+        return id === 'detail:UI-10' ? [initial] : [];
+      },
+      subscribe() {
+        return () => {};
+      }
+    };
+    const selection = {
+      isCollapsed: false,
+      toString() {
+        return 'Selectable';
+      }
+    };
+    const selection_spy = vi
+      .spyOn(window, 'getSelection')
+      .mockReturnValue(/** @type {Selection} */ (selection));
+    const view = createDetailView(mount, async () => ({}), undefined, stores);
+
+    await view.load('UI-10');
+    const md = /** @type {HTMLDivElement} */ (mount.querySelector('.md'));
+    md.click();
+
+    expect(mount.querySelector('.description textarea')).toBeNull();
+    selection_spy.mockRestore();
+  });
 });

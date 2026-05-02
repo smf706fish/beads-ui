@@ -127,7 +127,7 @@ describe('views/board keyboard navigation', () => {
     await view.load();
 
     const open_first = /** @type {HTMLElement} */ (
-      mount.querySelector('#blocked-col .board-card')
+      mount.querySelector('#ready-col .board-card')
     );
     const prog_first = /** @type {HTMLElement} */ (
       mount.querySelector('#in-progress-col .board-card')

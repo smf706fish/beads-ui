@@ -43,7 +43,7 @@ function createTestIssueStores() {
 }
 
 describe('views/board persisted closed filter via store', () => {
-  test('applies persisted closed_filter and updates store on change', async () => {
+  test('renders all done issues regardless of persisted closed_filter', async () => {
     document.body.innerHTML = '<div id="m"></div>';
     const mount = /** @type {HTMLElement} */ (document.getElementById('m'));
 
@@ -104,27 +104,11 @@ describe('views/board persisted closed filter via store', () => {
     );
     await view.load();
 
-    // With persisted '7' days, B and C visible (A is 8 days old)
-    let closed_ids = Array.from(
+    const closed_ids = Array.from(
       mount.querySelectorAll('#closed-col .board-card')
     ).map((el) => el.getAttribute('data-issue-id'));
-    expect(closed_ids).toEqual(['C', 'B']);
 
-    // Select reflects persisted value
-    const select = /** @type {HTMLSelectElement} */ (
-      mount.querySelector('#closed-filter')
-    );
-    expect(select.value).toBe('7');
-
-    // Change to '3' and ensure store updates
-    select.value = '3';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-    expect(store.getState().board.closed_filter).toBe('3');
-
-    // Now still B and C visible (both within 3 days)
-    closed_ids = Array.from(
-      mount.querySelectorAll('#closed-col .board-card')
-    ).map((el) => el.getAttribute('data-issue-id'));
-    expect(closed_ids).toEqual(['C', 'B']);
+    expect(closed_ids).toEqual(['C', 'B', 'A']);
+    expect(mount.querySelector('#closed-filter')).toBeNull();
   });
 });

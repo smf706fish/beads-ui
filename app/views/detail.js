@@ -1,14 +1,24 @@
 // Issue Detail view implementation (lit-html based)
 import { html, render } from 'lit-html';
+import { cmpPriorityThenCreated } from '../data/sort.js';
 import { parseView } from '../router.js';
 import { issueHashFor } from '../utils/issue-url.js';
 import { debug } from '../utils/logging.js';
 import { renderMarkdown } from '../utils/markdown.js';
-import { emojiForPriority } from '../utils/priority-badge.js';
 import { priority_levels } from '../utils/priority.js';
 import { statusLabel } from '../utils/status.js';
 import { showToast } from '../utils/toast.js';
 import { createTypeBadge } from '../utils/type-badge.js';
+
+const ISSUE_SNAPSHOT_CLIENT_IDS = [
+  'tab:issues',
+  'tab:epics',
+  'tab:board:ready',
+  'tab:board:blocked',
+  'tab:board:in-progress',
+  'tab:board:closed',
+  'tab:board:epics'
+];
 
 /**
  * Format a date string for display.
@@ -39,6 +49,8 @@ function formatCommentDate(dateStr) {
  * @property {string} [status]
  * @property {number} [priority]
  * @property {string} [issue_type]
+ * @property {string} [type]
+ * @property {string} [depends_on_id]
  */
 
 /**
@@ -60,6 +72,11 @@ function formatCommentDate(dateStr) {
  * @property {string} [status]
  * @property {(string|null)} [close_reason]
  * @property {string} [assignee]
+ * @property {string} [parent]
+ * @property {string} [parent_title]
+ * @property {string} [issue_type]
+ * @property {string | number} [created_at]
+ * @property {string | number} [updated_at]
  * @property {number} [priority]
  * @property {string[]} [labels]
  * @property {Dependency[]} [dependencies]
@@ -72,6 +89,127 @@ function formatCommentDate(dateStr) {
  */
 function defaultNavigateFn(hash) {
   window.location.hash = hash;
+}
+
+/**
+ * Map canonical status values to Jira-style issue labels.
+ *
+ * @param {string | null | undefined} status
+ * @returns {string}
+ */
+function jiraStatusLabel(status) {
+  switch ((status || '').toString()) {
+    case 'open':
+      return 'To Do';
+    case 'in_progress':
+      return 'In Progress';
+    case 'closed':
+      return 'Done';
+    default:
+      return statusLabel(status);
+  }
+}
+
+/**
+ * Format an issue timestamp for the Jira details footer.
+ *
+ * @param {string | number | null | undefined} value
+ * @returns {string}
+ */
+function formatIssueDate(value) {
+  if (!value) {
+    return 'None';
+  }
+  const raw_date =
+    typeof value === 'number'
+      ? new Date(value > 10_000_000_000 ? value : value * 1000)
+      : new Date(value);
+  if (Number.isNaN(raw_date.getTime())) {
+    return String(value);
+  }
+  return raw_date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+}
+
+/**
+ * Return a display name for user-like fields.
+ *
+ * @param {string | null | undefined} value
+ * @returns {string}
+ */
+function personName(value) {
+  const text = String(value || '').trim();
+  return text.length > 0 ? text : 'Unassigned';
+}
+
+/**
+ * Return compact initials for avatar placeholders.
+ *
+ * @param {string | null | undefined} value
+ * @returns {string}
+ */
+function personInitials(value) {
+  const name = personName(value);
+  if (name === 'Unassigned') {
+    return '';
+  }
+  const parts = name.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return `${parts[0].slice(0, 1)}${parts[parts.length - 1].slice(0, 1)}`.toUpperCase();
+}
+
+/**
+ * Render a Jira-style user avatar placeholder.
+ *
+ * @param {string | null | undefined} value
+ * @param {string} [class_name]
+ */
+function userAvatar(value, class_name = '') {
+  const has_person = String(value || '').trim().length > 0;
+  return html`<span
+    class=${`jira-user-avatar ${has_person ? '' : 'is-empty'} ${class_name}`}
+    aria-hidden="true"
+    >${personInitials(value)}</span
+  >`;
+}
+
+/**
+ * Render the small Jira issue-type glyph used beside issue ids.
+ *
+ * @param {string | null | undefined} issue_type
+ * @param {string} [class_name]
+ */
+function jiraIssueIcon(issue_type, class_name = '') {
+  const kind = String(issue_type || 'task').toLowerCase();
+  const normalized = ['bug', 'feature', 'task', 'epic', 'chore'].includes(kind)
+    ? kind
+    : 'task';
+  return html`<span
+    class=${`jira-issue-icon jira-issue-icon--${normalized} ${class_name}`}
+    aria-hidden="true"
+  ></span>`;
+}
+
+/**
+ * Count completed children in a Jira child issue list.
+ *
+ * @param {Dependency[]} items
+ * @returns {{ total: number, done: number, percent: number }}
+ */
+function childProgress(items) {
+  const total = Array.isArray(items) ? items.length : 0;
+  const done = Array.isArray(items)
+    ? items.filter((item) => item.status === 'closed').length
+    : 0;
+  const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+  return { total, done, percent };
 }
 
 /**
@@ -214,6 +352,219 @@ export function createDetailView(
     /** @type {'issues'|'epics'|'board'} */
     const view = parseView(window.location.hash || '');
     return issueHashFor(view, id);
+  }
+
+  /**
+   * Read a timestamp field from an issue, supporting legacy key variants.
+   *
+   * @param {IssueDetail} issue
+   * @param {'created'|'updated'} field
+   * @returns {string | number | null | undefined}
+   */
+  function issueTimestamp(issue, field) {
+    const any_issue = /** @type {any} */ (issue);
+    if (field === 'created') {
+      return (
+        any_issue.created_at ??
+        any_issue.createdAt ??
+        any_issue.created ??
+        undefined
+      );
+    }
+    return (
+      any_issue.updated_at ??
+      any_issue.updatedAt ??
+      any_issue.updated ??
+      undefined
+    );
+  }
+
+  /**
+   * Return all currently available issue snapshots from open list stores.
+   *
+   * @param {string[]} [extra_client_ids]
+   * @returns {IssueDetail[]}
+   */
+  function issueSnapshots(extra_client_ids = []) {
+    if (!issue_stores || typeof issue_stores.snapshotFor !== 'function') {
+      return [];
+    }
+    /** @type {Map<string, IssueDetail>} */
+    const by_id = new Map();
+    const client_ids = new Set([
+      ...ISSUE_SNAPSHOT_CLIENT_IDS,
+      ...extra_client_ids
+    ]);
+    for (const client_id of client_ids) {
+      if (!client_id) {
+        continue;
+      }
+      const arr = /** @type {IssueDetail[]} */ (
+        issue_stores.snapshotFor(client_id)
+      );
+      if (!Array.isArray(arr)) {
+        continue;
+      }
+      for (const issue of arr) {
+        const id = issue && typeof issue.id === 'string' ? issue.id : '';
+        if (id) {
+          by_id.set(id, issue);
+        }
+      }
+    }
+    return Array.from(by_id.values());
+  }
+
+  /**
+   * Find an issue in all available snapshots.
+   *
+   * @param {string} id
+   * @returns {IssueDetail | null}
+   */
+  function snapshotIssueById(id) {
+    const snapshots = issueSnapshots([`detail:${id}`]);
+    return snapshots.find((issue) => String(issue.id) === String(id)) || null;
+  }
+
+  /**
+   * Return the parent-child dependency for an issue, when present.
+   *
+   * @param {IssueDetail | Dependency} issue
+   * @returns {Dependency | null}
+   */
+  function parentDependencyForIssue(issue) {
+    const deps = Array.isArray(/** @type {IssueDetail} */ (issue).dependencies)
+      ? /** @type {IssueDetail} */ (issue).dependencies || []
+      : [];
+    return (
+      deps.find(
+        (dep) =>
+          dep && dep.type === 'parent-child' && (dep.depends_on_id || dep.id)
+      ) || null
+    );
+  }
+
+  /**
+   * Return an issue's parent epic id.
+   *
+   * @param {IssueDetail | Dependency} issue
+   * @returns {string}
+   */
+  function parentIdForIssue(issue) {
+    const any_issue = /** @type {any} */ (issue);
+    if (typeof any_issue.parent === 'string' && any_issue.parent.length > 0) {
+      return any_issue.parent;
+    }
+    if (
+      typeof any_issue.parent_id === 'string' &&
+      any_issue.parent_id.length > 0
+    ) {
+      return any_issue.parent_id;
+    }
+    const parent_dep = parentDependencyForIssue(issue);
+    if (!parent_dep) {
+      return '';
+    }
+    return String(parent_dep.depends_on_id || parent_dep.id || '');
+  }
+
+  /**
+   * Strip the storage prefix used by bd epic titles.
+   *
+   * @param {string} title
+   * @returns {string}
+   */
+  function cleanEpicTitle(title) {
+    return title.replace(/^EPIC:\s*/i, '').trim();
+  }
+
+  /**
+   * Return the display title for the parent epic of an issue.
+   *
+   * @param {IssueDetail | Dependency} issue
+   * @returns {string}
+   */
+  function epicTitleForIssue(issue) {
+    const any_issue = /** @type {any} */ (issue);
+    const direct_title =
+      typeof any_issue.parent_title === 'string' &&
+      any_issue.parent_title.trim().length > 0
+        ? any_issue.parent_title
+        : typeof any_issue.epic_title === 'string' &&
+            any_issue.epic_title.trim().length > 0
+          ? any_issue.epic_title
+          : '';
+    if (direct_title) {
+      return cleanEpicTitle(direct_title);
+    }
+
+    const parent_dep = parentDependencyForIssue(issue);
+    if (parent_dep && typeof parent_dep.title === 'string') {
+      return cleanEpicTitle(parent_dep.title);
+    }
+
+    const parent_id = parentIdForIssue(issue);
+    if (!parent_id) {
+      return '';
+    }
+
+    const parent_issue = snapshotIssueById(parent_id);
+    if (parent_issue && typeof parent_issue.title === 'string') {
+      return cleanEpicTitle(parent_issue.title);
+    }
+    return parent_id;
+  }
+
+  /**
+   * Return issues related by sharing the same parent epic.
+   *
+   * @param {IssueDetail} issue
+   * @returns {IssueDetail[]}
+   */
+  function relatedIssuesForIssue(issue) {
+    const parent_id = parentIdForIssue(issue);
+    const issue_type = String(issue.issue_type || '').toLowerCase();
+    if (!parent_id || issue_type === 'epic') {
+      return [];
+    }
+
+    /** @type {Map<string, IssueDetail>} */
+    const by_id = new Map();
+    const snapshots = issueSnapshots([
+      `detail:${parent_id}`,
+      current_id ? `detail:${current_id}` : ''
+    ]);
+    for (const candidate of snapshots) {
+      const candidate_id = String(candidate.id || '');
+      if (!candidate_id) {
+        continue;
+      }
+
+      if (candidate_id === parent_id && Array.isArray(candidate.dependents)) {
+        for (const child of candidate.dependents) {
+          const child_id = String(child.id || '');
+          if (child_id && child_id !== issue.id) {
+            by_id.set(child_id, /** @type {IssueDetail} */ (child));
+          }
+        }
+        continue;
+      }
+
+      if (
+        candidate_id !== issue.id &&
+        candidate_id !== parent_id &&
+        String(candidate.issue_type || '').toLowerCase() !== 'epic' &&
+        parentIdForIssue(candidate) === parent_id
+      ) {
+        by_id.set(candidate_id, candidate);
+      }
+    }
+
+    return Array.from(by_id.values()).sort(
+      /** @type {(a: IssueDetail, b: IssueDetail) => number} */ (
+        cmpPriorityThenCreated
+      )
+    );
   }
 
   /**
@@ -531,7 +882,26 @@ export function createDetailView(
     }
   };
 
-  const onDescEdit = () => {
+  /**
+   * Return true when the user has selected text in the document.
+   *
+   * @returns {boolean}
+   */
+  function hasActiveTextSelection() {
+    const selection =
+      typeof window.getSelection === 'function' ? window.getSelection() : null;
+    return Boolean(
+      selection && !selection.isCollapsed && selection.toString().trim()
+    );
+  }
+
+  /**
+   * @param {MouseEvent | KeyboardEvent} [ev]
+   */
+  const onDescEdit = (ev = undefined) => {
+    if (ev instanceof MouseEvent && hasActiveTextSelection()) {
+      return;
+    }
     edit_desc = true;
     doRender();
   };
@@ -903,11 +1273,150 @@ export function createDetailView(
   }
 
   /**
+   * Render the Jira-style child issue table for dependents.
+   *
+   * @param {Dependency[]} items
+   * @param {{ total: number, done: number, percent: number }} progress
+   */
+  function childIssuesBlock(items, progress) {
+    const sorted_items = Array.isArray(items) ? items.slice() : [];
+    return html`
+      <section class="jira-child-issues" aria-label="Child issues">
+        <div class="jira-child-issues__header">
+          <h3 class="jira-section-title">Child issues</h3>
+          <div class="jira-child-issues__controls">
+            <button type="button">
+              Order by <span class="jira-chevron"></span>
+            </button>
+            <button type="button" aria-label="More child issue actions">
+              ...
+            </button>
+            <button type="button" aria-label="Add child issue">+</button>
+          </div>
+        </div>
+        <div class="jira-child-progress">
+          <div class="jira-child-progress__bar" aria-hidden="true">
+            <span style=${`width: ${progress.percent}%`}></span>
+          </div>
+          <div class="jira-child-progress__label">
+            ${progress.percent}% Done
+          </div>
+        </div>
+        <div class="jira-child-list">
+          ${sorted_items.length === 0
+            ? html`<div class="jira-child-empty muted">No child issues</div>`
+            : sorted_items.map((item) => {
+                const child_id = item.id;
+                const href = issueHref(child_id);
+                return html`
+                  <div
+                    class="jira-child-row"
+                    data-href=${href}
+                    @click=${() => navigateFn(href)}
+                  >
+                    <div class="jira-child-row__issue">
+                      ${jiraIssueIcon(item.issue_type, 'is-child')}
+                      <button
+                        type="button"
+                        class="jira-child-id"
+                        @click=${(/** @type {MouseEvent} */ ev) => {
+                          ev.stopPropagation();
+                          navigateFn(href);
+                        }}
+                      >
+                        ${child_id}
+                      </button>
+                    </div>
+                    <div class="jira-child-row__title">${item.title || ''}</div>
+                    ${userAvatar(/** @type {any} */ (item).assignee)}
+                    <button
+                      type="button"
+                      class=${`jira-child-status is-${item.status || 'open'}`}
+                    >
+                      ${jiraStatusLabel(item.status).toUpperCase()}
+                      <span class="jira-chevron"></span>
+                    </button>
+                  </div>
+                `;
+              })}
+        </div>
+      </section>
+    `;
+  }
+
+  /**
+   * Render issues related by the same parent epic.
+   *
+   * @param {IssueDetail[]} items
+   */
+  function relatedIssuesBlock(items) {
+    const sorted_items = Array.isArray(items) ? items.slice() : [];
+    return html`
+      <section class="jira-related-issues" aria-label="Related issues">
+        <div class="jira-child-issues__header">
+          <h3 class="jira-section-title">Related issues</h3>
+        </div>
+        <div class="jira-child-list">
+          ${sorted_items.length === 0
+            ? html`<div class="jira-child-empty muted">No related issues</div>`
+            : sorted_items.map((item) => {
+                const related_id = item.id;
+                const href = issueHref(related_id);
+                return html`
+                  <div
+                    class="jira-child-row jira-related-row"
+                    data-href=${href}
+                    @click=${() => navigateFn(href)}
+                  >
+                    <div class="jira-child-row__issue">
+                      ${jiraIssueIcon(item.issue_type, 'is-child')}
+                      <button
+                        type="button"
+                        class="jira-child-id"
+                        @click=${(/** @type {MouseEvent} */ ev) => {
+                          ev.stopPropagation();
+                          navigateFn(href);
+                        }}
+                      >
+                        ${related_id}
+                      </button>
+                    </div>
+                    <div class="jira-child-row__title">${item.title || ''}</div>
+                    ${userAvatar(/** @type {any} */ (item).assignee)}
+                    <button
+                      type="button"
+                      class=${`jira-child-status is-${item.status || 'open'}`}
+                    >
+                      ${jiraStatusLabel(item.status).toUpperCase()}
+                      <span class="jira-chevron"></span>
+                    </button>
+                  </div>
+                `;
+              })}
+        </div>
+      </section>
+    `;
+  }
+
+  /**
    * @param {IssueDetail} issue
    */
   function detailTemplate(issue) {
+    const issue_type = String(/** @type {any} */ (issue).issue_type || 'task');
+    const reporter = String(
+      /** @type {any} */ (issue).reporter || issue.assignee || ''
+    );
+    const created_at = formatIssueDate(issueTimestamp(issue, 'created'));
+    const updated_at = formatIssueDate(issueTimestamp(issue, 'updated'));
+    const epic_title = epicTitleForIssue(issue);
+    const child_issues = Array.isArray(issue.dependents)
+      ? issue.dependents
+      : [];
+    const child_progress = childProgress(child_issues);
+    const related_issues = relatedIssuesForIssue(issue);
+
     const title_zone = edit_title
-      ? html`<div class="detail-title">
+      ? html`<div class="detail-title jira-title">
           <h2>
             <input
               type="text"
@@ -919,7 +1428,7 @@ export function createDetailView(
             <button @click=${onTitleCancel}>Cancel</button>
           </h2>
         </div>`
-      : html`<div class="detail-title">
+      : html`<div class="detail-title jira-title">
           <h2>
             <span
               class="editable"
@@ -944,7 +1453,7 @@ export function createDetailView(
         return ['open', 'in_progress', 'closed'].map(
           (s) =>
             html`<option value=${s} ?selected=${cur === s}>
-              ${statusLabel(s)}
+              ${jiraStatusLabel(s)}
             </option>`
         );
       })()}
@@ -965,14 +1474,15 @@ export function createDetailView(
         return priority_levels.map(
           (p, i) =>
             html`<option value=${String(i)} ?selected=${cur === String(i)}>
-              ${emojiForPriority(i)} ${p}
+              ${p}
             </option>`
         );
       })()}
     </select>`;
 
     const desc_block = edit_desc
-      ? html`<div class="description">
+      ? html`<section class="description jira-section">
+          <h3 class="jira-section-title">Description</h3>
           <textarea
             @keydown=${onDescKeydown}
             .value=${issue.description || ''}
@@ -983,23 +1493,30 @@ export function createDetailView(
             <button @click=${onDescSave}>Save</button>
             <button @click=${onDescCancel}>Cancel</button>
           </div>
-        </div>`
-      : html`<div
-          class="md editable"
-          tabindex="0"
-          role="button"
-          aria-label="Edit description"
-          @click=${onDescEdit}
-          @keydown=${onDescEditableKeydown}
-        >
-          ${(() => {
-            const text = issue.description || '';
-            if (text.trim() === '') {
-              return html`<div class="muted">Description</div>`;
-            }
-            return renderMarkdown(text);
-          })()}
-        </div>`;
+          ${childIssuesBlock(child_issues, child_progress)}
+          ${relatedIssuesBlock(related_issues)}
+        </section>`
+      : html`<section class="description jira-section">
+          <h3 class="jira-section-title">Description</h3>
+          <div
+            class="md editable jira-description-read"
+            tabindex="0"
+            role="button"
+            aria-label="Edit description"
+            @click=${onDescEdit}
+            @keydown=${onDescEditableKeydown}
+          >
+            ${(() => {
+              const text = issue.description || '';
+              if (text.trim() === '') {
+                return html`<div class="muted">Add a description...</div>`;
+              }
+              return renderMarkdown(text);
+            })()}
+          </div>
+          ${childIssuesBlock(child_issues, child_progress)}
+          ${relatedIssuesBlock(related_issues)}
+        </section>`;
 
     // Normalize acceptance text: prefer issue.acceptance, fallback to acceptance_criteria from bd
     const acceptance_text = (() => {
@@ -1012,7 +1529,7 @@ export function createDetailView(
     })();
 
     const accept_block = edit_accept
-      ? html`<div class="acceptance">
+      ? html`<div class="acceptance jira-aux-section">
           ${acceptance_text.trim().length > 0
             ? html`<div class="props-card__title">Acceptance Criteria</div>`
             : ''}
@@ -1027,7 +1544,11 @@ export function createDetailView(
             <button @click=${onAcceptCancel}>Cancel</button>
           </div>
         </div>`
-      : html`<div class="acceptance">
+      : html`<div
+          class=${`acceptance jira-aux-section ${
+            acceptance_text.trim().length > 0 ? '' : 'is-empty'
+          }`}
+        >
           ${(() => {
             const text = acceptance_text;
             const has = text.trim().length > 0;
@@ -1052,7 +1573,7 @@ export function createDetailView(
     // Notes: editable in-place similar to Description
     const notes_text = String(issue.notes || '');
     const notes_block = edit_notes
-      ? html`<div class="notes">
+      ? html`<div class="notes jira-aux-section">
           ${notes_text.trim().length > 0
             ? html`<div class="props-card__title">Notes</div>`
             : ''}
@@ -1067,7 +1588,11 @@ export function createDetailView(
             <button @click=${onNotesCancel}>Cancel</button>
           </div>
         </div>`
-      : html`<div class="notes">
+      : html`<div
+          class=${`notes jira-aux-section ${
+            notes_text.trim().length > 0 ? '' : 'is-empty'
+          }`}
+        >
           ${(() => {
             const text = notes_text;
             const has = text.trim().length > 0;
@@ -1091,30 +1616,27 @@ export function createDetailView(
 
     // Labels section
     const labels = Array.isArray(issue.labels) ? issue.labels : [];
-    const labels_block = html`<div class="props-card labels">
-      <div>
-        <div class="props-card__title">Labels</div>
+    const labels_block = html`<div class="prop labels">
+      <div class="label">Labels</div>
+      <div class="value jira-label-value">
+        ${labels.length === 0
+          ? html`<span class="jira-none">None</span>`
+          : labels.map(
+              (l) =>
+                html`<span class="badge" title=${l}
+                  >${l}
+                  <button
+                    class="icon-button"
+                    title="Remove label"
+                    aria-label=${'Remove label ' + l}
+                    @click=${() => onRemoveLabel(l)}
+                  >
+                    x
+                  </button></span
+                >`
+            )}
       </div>
-      <ul>
-        ${labels.map(
-          (l) =>
-            html`<li>
-              <span class="badge" title=${l}
-                >${l}
-                <button
-                  class="icon-button"
-                  title="Remove label"
-                  aria-label=${'Remove label ' + l}
-                  @click=${() => onRemoveLabel(l)}
-                  style="margin-left:6px"
-                >
-                  ×
-                </button></span
-              >
-            </li>`
-        )}
-      </ul>
-      <div class="props-card__footer">
+      <div class="props-card__footer jira-field-editor">
         <input
           type="text"
           placeholder="Label"
@@ -1130,7 +1652,7 @@ export function createDetailView(
     // Design section block
     const design_text = String(issue.design || '');
     const design_block = edit_design
-      ? html`<div class="design">
+      ? html`<div class="design jira-aux-section">
           ${design_text.trim().length > 0
             ? html`<div class="props-card__title">Design</div>`
             : ''}
@@ -1145,7 +1667,11 @@ export function createDetailView(
             <button @click=${onDesignCancel}>Cancel</button>
           </div>
         </div>`
-      : html`<div class="design">
+      : html`<div
+          class=${`design jira-aux-section ${
+            design_text.trim().length > 0 ? '' : 'is-empty'
+          }`}
+        >
           ${(() => {
             const text = design_text;
             const has = text.trim().length > 0;
@@ -1171,10 +1697,9 @@ export function createDetailView(
     const comments = Array.isArray(/** @type {any} */ (issue).comments)
       ? /** @type {Comment[]} */ (/** @type {any} */ (issue).comments)
       : [];
-    const comments_block = html`<div class="comments">
-      <div class="props-card__title">Comments</div>
+    const comments_block = html`<div class="comments jira-comments">
       ${comments.length === 0
-        ? html`<div class="muted">No comments yet</div>`
+        ? html`<div class="jira-comments-empty muted">No comments yet</div>`
         : comments.map(
             (c) => html`
               <div class="comment-item">
@@ -1188,67 +1713,69 @@ export function createDetailView(
               </div>
             `
           )}
-      <div class="comment-input">
-        <textarea
-          placeholder="Add a comment... (Ctrl+Enter to submit)"
-          rows="3"
-          .value=${comment_text}
-          @input=${onCommentInput}
-          @keydown=${onCommentKeydown}
-          ?disabled=${comment_pending}
-        ></textarea>
-        <button
-          @click=${onCommentSubmit}
-          ?disabled=${comment_pending || !comment_text.trim()}
-        >
-          ${comment_pending ? 'Adding...' : 'Add Comment'}
-        </button>
+      <div class="jira-comment-composer">
+        ${userAvatar(issue.assignee, 'jira-comment-avatar')}
+        <div class="comment-input">
+          <textarea
+            placeholder="Add a comment..."
+            rows="2"
+            .value=${comment_text}
+            @input=${onCommentInput}
+            @keydown=${onCommentKeydown}
+            ?disabled=${comment_pending}
+          ></textarea>
+          <button
+            @click=${onCommentSubmit}
+            ?disabled=${comment_pending || !comment_text.trim()}
+          >
+            ${comment_pending ? 'Adding...' : 'Add Comment'}
+          </button>
+          <div class="jira-comment-tip">
+            <strong>Pro tip:</strong> press <kbd>M</kbd> to comment
+          </div>
+        </div>
       </div>
     </div>`;
 
     return html`
       <div class="panel__body" id="detail-root">
+        <div class="detail-topbar">
+          <div class="detail-breadcrumb" aria-label="Issue breadcrumb">
+            <span class="jira-pencil-icon" aria-hidden="true"></span>
+            <button type="button" class="jira-breadcrumb-button">
+              ${epic_title || 'Add epic'}
+            </button>
+            <span class="jira-breadcrumb-separator">/</span>
+            ${jiraIssueIcon(issue_type)}
+            <span class="jira-breadcrumb-id">${issue.id}</span>
+          </div>
+          <div class="jira-action-bar" aria-label="Issue actions">
+            <button type="button" class="jira-icon-button jira-icon-button--lock" aria-label="Lock issue"></button>
+            <button type="button" class="jira-icon-button jira-icon-button--eye" aria-label="Watch issue">
+              <span>1</span>
+            </button>
+            <button type="button" class="jira-icon-button jira-icon-button--thumb" aria-label="Vote for issue"></button>
+            <button type="button" class="jira-icon-button jira-icon-button--share" aria-label="Share issue"></button>
+            <button
+              class="delete-issue-btn jira-icon-button jira-icon-button--more"
+              title="Delete issue"
+              aria-label="Delete issue"
+              @click=${onDeleteClick}
+            ></button>
+          </div>
+        </div>
         <div class="detail-layout">
           <div class="detail-main">
             ${title_zone} ${desc_block} ${design_block} ${notes_block}
             ${accept_block} ${comments_block}
           </div>
           <div class="detail-side">
-            <div class="props-card">
+            <div class="jira-status-control">${status_select}</div>
+            <div class="props-card jira-detail-card">
               <div class="props-card__header">
-                <div class="props-card__title">Properties</div>
-                <button class="delete-issue-btn" title="Delete issue" aria-label="Delete issue" @click=${onDeleteClick}>
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="3 6 5 6 21 6"></polyline>
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    <line x1="10" y1="11" x2="10" y2="17"></line>
-                    <line x1="14" y1="11" x2="14" y2="17"></line>
-                  </svg>
-                  <span class="tooltip">Delete issue</span>
-                </button>
+                <div class="props-card__title">Details</div>
+                <button type="button" class="jira-collapse-button" aria-label="Collapse Details"></button>
               </div>
-                <div class="prop">
-                  <div class="label">Type</div>
-                  <div class="value">
-                    ${createTypeBadge(/** @type {any} */ (issue).issue_type)}
-                  </div>
-                </div>
-                <div class="prop">
-                  <div class="label">Status</div>
-                  <div class="value">${status_select}</div>
-                </div>
-                ${
-                  issue.close_reason
-                    ? html`<div class="prop">
-                        <div class="label">Close Reason</div>
-                        <div class="value">${issue.close_reason}</div>
-                      </div>`
-                    : ''
-                }
-                <div class="prop">
-                  <div class="label">Priority</div>
-                  <div class="value">${priority_select}</div>
-                </div>
                 <div class="prop assignee">
                   <div class="label">Assignee</div>
                   <div class="value">
@@ -1295,25 +1822,83 @@ export function createDetailView(
                             const has = raw.trim().length > 0;
                             const text = has ? raw : 'Unassigned';
                             const cls = has ? 'editable' : 'editable muted';
-                            return html`<span
-                              class=${cls}
-                              tabindex="0"
-                              role="button"
-                              aria-label="Edit assignee"
-                              @click=${onAssigneeSpanClick}
-                              @keydown=${onAssigneeKeydown}
-                              >${text}</span
-                            >`;
+                            return html`${userAvatar(raw)}
+                              <span
+                                class=${cls}
+                                tabindex="0"
+                                role="button"
+                                aria-label="Edit assignee"
+                                @click=${onAssigneeSpanClick}
+                                @keydown=${onAssigneeKeydown}
+                                >${text}</span
+                              >`;
                           })()}`
                     }
                   </div>
                 </div>
+                ${labels_block}
+                <div class="prop">
+                  <div class="label">Epic</div>
+                  <div class="value">
+                    ${
+                      epic_title
+                        ? html`<span class="jira-epic-pill" title=${epic_title}>
+                            ${epic_title}
+                          </span>`
+                        : html`<span class="jira-none">None</span>`
+                    }
+                  </div>
+                </div>
+                <div class="prop">
+                  <div class="label">Priority</div>
+                  <div class="value jira-priority-value">
+                    <span
+                      class=${`jira-priority-icon is-p${String(
+                        typeof issue.priority === 'number' ? issue.priority : 2
+                      )}`}
+                      aria-hidden="true"
+                    ></span>
+                    ${priority_select}
+                  </div>
+                </div>
+                <div class="prop">
+                  <div class="label">Fix versions</div>
+                  <div class="value"><span class="jira-none">None</span></div>
+                </div>
+                <div class="prop reporter">
+                  <div class="label">Reporter</div>
+                  <div class="value">
+                    ${userAvatar(reporter)}
+                    <span>${personName(reporter)}</span>
+                  </div>
+                </div>
+                <div class="prop jira-hidden-type">
+                  <div class="label">Type</div>
+                  <div class="value">${createTypeBadge(issue_type)}</div>
+                </div>
+                ${
+                  issue.close_reason
+                    ? html`<div class="prop">
+                        <div class="label">Close Reason</div>
+                        <div class="value">${issue.close_reason}</div>
+                      </div>`
+                    : ''
+                }
               </div>
-              ${labels_block}
-              ${depsSection('Dependencies', issue.dependencies || [])}
-              ${depsSection('Dependents', issue.dependents || [])}
+              <div class="jira-detail-meta">
+                <div>Created ${created_at}</div>
+                <div>Updated ${updated_at}</div>
+                <button type="button" class="jira-configure-button">
+                  <span aria-hidden="true"></span>
+                  Configure
+                </button>
+              </div>
             </div>
           </div>
+        </div>
+        <div class="jira-related-links">
+          ${depsSection('Dependencies', issue.dependencies || [])}
+          ${depsSection('Dependents', issue.dependents || [])}
         </div>
       </div>
     `;

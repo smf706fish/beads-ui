@@ -4,6 +4,9 @@ app/main.bundle.js
 app/main.bundle.js.map
 .DS_Store
 .beads/issues.jsonl
+.playwright-mcp/
+current-board-before.png
+jira-redesign*.png
 
 # Dolt database files (added by bd init)
 .dolt/

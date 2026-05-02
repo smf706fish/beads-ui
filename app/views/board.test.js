@@ -43,7 +43,7 @@ function createTestIssueStores() {
 }
 
 describe('views/board', () => {
-  test('renders four columns (Blocked, Ready, In Progress, Closed) with sorted cards and navigates on click', async () => {
+  test('renders To Do, In Progress, and Done with sorted cards and navigates on click', async () => {
     document.body.innerHTML = '<div id="m"></div>';
     const mount = /** @type {HTMLElement} */ (document.getElementById('m'));
 
@@ -163,17 +163,11 @@ describe('views/board', () => {
 
     await view.load();
 
-    // Blocked: priority asc, then created_at desc for equal priority
-    const blocked_ids = Array.from(
-      mount.querySelectorAll('#blocked-col .board-card .mono')
-    ).map((el) => el.textContent?.trim());
-    expect(blocked_ids).toEqual(['B-1', 'B-2']);
-
-    // Ready: priority asc, then created_at asc for equal priority
-    const ready_ids = Array.from(
+    // To Do combines blocked and ready open work, sorted priority then created_at.
+    const todo_ids = Array.from(
       mount.querySelectorAll('#ready-col .board-card .mono')
     ).map((el) => el.textContent?.trim());
-    expect(ready_ids).toEqual(['R-1', 'R-2', 'R-3']);
+    expect(todo_ids).toEqual(['B-1', 'R-1', 'R-2', 'B-2', 'R-3']);
 
     // In progress: priority asc (default), then created_at asc
     const prog_ids = Array.from(
@@ -188,11 +182,11 @@ describe('views/board', () => {
     expect(closed_ids).toEqual(['C-2', 'C-1']);
 
     // Click navigates
-    const first_ready = /** @type {HTMLElement|null} */ (
+    const first_todo = /** @type {HTMLElement|null} */ (
       mount.querySelector('#ready-col .board-card')
     );
-    first_ready?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(navigations[0]).toBe('R-1');
+    first_todo?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(navigations[0]).toBe('B-1');
   });
 
   test('shows column count badges next to titles', async () => {
@@ -290,10 +284,7 @@ describe('views/board', () => {
 
     await view.load();
 
-    const blocked_count = mount
-      .querySelector('#blocked-col .board-column__count')
-      ?.textContent?.trim();
-    const ready_count = mount
+    const todo_count = mount
       .querySelector('#ready-col .board-column__count')
       ?.textContent?.trim();
     const in_progress_count = mount
@@ -303,8 +294,7 @@ describe('views/board', () => {
       .querySelector('#closed-col .board-column__count')
       ?.textContent?.trim();
 
-    expect(blocked_count).toBe('2');
-    expect(ready_count).toBe('3');
+    expect(todo_count).toBe('5');
     expect(in_progress_count).toBe('1');
     expect(closed_count).toBe('1');
 
@@ -314,7 +304,7 @@ describe('views/board', () => {
     expect(closed_label).toBe('1 issue');
   });
 
-  test('filters Ready to exclude items that are In Progress', async () => {
+  test('filters To Do to exclude items that are In Progress', async () => {
     document.body.innerHTML = '<div id="m"></div>';
     const mount = /** @type {HTMLElement} */ (document.getElementById('m'));
 
@@ -361,16 +351,66 @@ describe('views/board', () => {
 
     await view.load();
 
-    const ready_ids = Array.from(
+    const todo_ids = Array.from(
       mount.querySelectorAll('#ready-col .board-card .mono')
     ).map((el) => el.textContent?.trim());
 
-    // X-2 is in progress, so Ready should only show X-1
-    expect(ready_ids).toEqual(['X-1']);
+    // X-2 is in progress, so To Do should only show X-1
+    expect(todo_ids).toEqual(['X-1']);
 
     const prog_ids = Array.from(
       mount.querySelectorAll('#in-progress-col .board-card .mono')
     ).map((el) => el.textContent?.trim());
     expect(prog_ids).toEqual(['X-2']);
+  });
+
+  test('renders parent epic title as card tag', async () => {
+    document.body.innerHTML = '<div id="m"></div>';
+    const mount = /** @type {HTMLElement} */ (document.getElementById('m'));
+    const issueStores = createTestIssueStores();
+    issueStores.getStore('tab:board:ready').applyPush({
+      type: 'snapshot',
+      id: 'tab:board:ready',
+      revision: 1,
+      issues: [
+        {
+          id: 'T-1',
+          title: 'child task',
+          parent: 'E-1',
+          issue_type: 'task',
+          created_at: 1,
+          updated_at: 1
+        }
+      ]
+    });
+    issueStores.getStore('tab:board:epics').applyPush({
+      type: 'snapshot',
+      id: 'tab:board:epics',
+      revision: 1,
+      issues: [
+        {
+          id: 'E-1',
+          title: 'EPIC: Billing launch',
+          issue_type: 'epic',
+          created_at: 1,
+          updated_at: 1
+        }
+      ]
+    });
+
+    const view = createBoardView(
+      mount,
+      null,
+      () => {},
+      undefined,
+      undefined,
+      issueStores
+    );
+
+    await view.load();
+
+    expect(mount.querySelector('.jira-card-label')?.textContent?.trim()).toBe(
+      'Billing launch'
+    );
   });
 });

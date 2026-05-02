@@ -104,6 +104,67 @@ describe('views/detail', () => {
     expect(badge && badge.textContent).toBe('Feature');
   });
 
+  test('renders parent epic, related siblings, and issue timestamps', async () => {
+    document.body.innerHTML =
+      '<section class="panel"><div id="mount"></div></section>';
+    const mount = /** @type {HTMLElement} */ (document.getElementById('mount'));
+    const issue = {
+      id: 'UI-51',
+      title: 'Child task',
+      issue_type: 'task',
+      parent: 'EPIC-1',
+      parent_title: 'EPIC: Billing accounts',
+      created_at: Date.parse('2026-05-01T12:00:00.000Z'),
+      updated_at: Date.parse('2026-05-01T13:30:00.000Z'),
+      dependencies: [],
+      dependents: []
+    };
+    const sibling = {
+      id: 'UI-52',
+      title: 'Sibling test',
+      issue_type: 'task',
+      parent: 'EPIC-1',
+      status: 'open',
+      priority: 1,
+      created_at: Date.parse('2026-05-01T11:00:00.000Z')
+    };
+    const unrelated = {
+      id: 'UI-53',
+      title: 'Other epic child',
+      issue_type: 'task',
+      parent: 'EPIC-2',
+      status: 'open'
+    };
+    const stores = {
+      /** @param {string} id */
+      snapshotFor(id) {
+        if (id === 'detail:UI-51') {
+          return [issue];
+        }
+        if (id === 'tab:board:ready') {
+          return [issue, sibling, unrelated];
+        }
+        return [];
+      },
+      subscribe() {
+        return () => {};
+      }
+    };
+    const view = createDetailView(mount, async () => ({}), undefined, stores);
+
+    await view.load('UI-51');
+
+    const breadcrumb = mount.querySelector('.jira-breadcrumb-button');
+    expect(breadcrumb?.textContent?.trim()).toBe('Billing accounts');
+    expect(mount.textContent || '').toContain('Epic');
+    expect(mount.textContent || '').toContain('Billing accounts');
+    expect(mount.textContent || '').toContain('Related issues');
+    expect(mount.textContent || '').toContain('Sibling test');
+    expect(mount.textContent || '').not.toContain('Other epic child');
+    expect(mount.textContent || '').toContain('Created');
+    expect(mount.textContent || '').toContain('2026');
+  });
+
   test('inline editing toggles for title and description', async () => {
     document.body.innerHTML =
       '<section class="panel"><div id="mount"></div></section>';

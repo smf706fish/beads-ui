@@ -181,6 +181,10 @@ export function bootstrap(root_element) {
         void unsub_board_blocked().catch(() => {});
         unsub_board_blocked = null;
       }
+      if (unsub_board_epics) {
+        void unsub_board_epics().catch(() => {});
+        unsub_board_epics = null;
+      }
       // Clear all subscription stores
       const storeIds = [
         'tab:issues',
@@ -188,7 +192,8 @@ export function bootstrap(root_element) {
         'tab:board:ready',
         'tab:board:in-progress',
         'tab:board:closed',
-        'tab:board:blocked'
+        'tab:board:blocked',
+        'tab:board:epics'
       ];
       for (const id of storeIds) {
         try {
@@ -658,6 +663,8 @@ export function bootstrap(root_element) {
     let unsub_board_closed = null;
     /** @type {null | (() => Promise<void>)} */
     let unsub_board_blocked = null;
+    /** @type {null | (() => Promise<void>)} */
+    let unsub_board_epics = null;
 
     // Track in-flight subscriptions to prevent duplicates during rapid view switching
     /** @type {Set<string>} */
@@ -876,6 +883,28 @@ export function bootstrap(root_element) {
               pending_subscriptions.delete('tab:board:blocked');
             });
         }
+        // Epics list for parent-epic card tags
+        if (
+          !unsub_board_epics &&
+          !pending_subscriptions.has('tab:board:epics')
+        ) {
+          try {
+            sub_issue_stores.register('tab:board:epics', { type: 'epics' });
+          } catch (err) {
+            log('register board:epics store failed: %o', err);
+          }
+          pending_subscriptions.add('tab:board:epics');
+          void subscriptions
+            .subscribeList('tab:board:epics', { type: 'epics' })
+            .then((u) => (unsub_board_epics = u))
+            .catch((err) => {
+              log('subscribe board epics failed: %o', err);
+              showFatalFromError(err, 'board (Epics)');
+            })
+            .finally(() => {
+              pending_subscriptions.delete('tab:board:epics');
+            });
+        }
       } else {
         // Unsubscribe all board lists when leaving the board view
         if (unsub_board_ready) {
@@ -912,6 +941,15 @@ export function bootstrap(root_element) {
             sub_issue_stores.unregister('tab:board:blocked');
           } catch (err) {
             log('unregister board:blocked failed: %o', err);
+          }
+        }
+        if (unsub_board_epics) {
+          void unsub_board_epics().catch(() => {});
+          unsub_board_epics = null;
+          try {
+            sub_issue_stores.unregister('tab:board:epics');
+          } catch (err) {
+            log('unregister board:epics failed: %o', err);
           }
         }
       }

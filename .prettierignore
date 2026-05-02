@@ -6,3 +6,6 @@ CHANGES.md
 app/main.bundle.js
 app/main.bundle.js.map
 dev-docs
+.playwright-mcp
+current-board-before.png
+jira-redesign*.png

@@ -9,9 +9,25 @@
   <body>
     <header class="app-header">
       <div class="header-left">
-        <h1 class="app-title">Beads</h1>
+        <button
+          class="app-switcher"
+          type="button"
+          aria-label="Open app switcher"
+        >
+          <span aria-hidden="true"></span>
+        </button>
+        <h1 class="app-title">Jira</h1>
         <div id="workspace-picker" class="header-workspace"></div>
         <nav id="top-nav" class="header-nav" aria-label="Primary"></nav>
+        <button
+          id="new-issue-btn"
+          class="jira-create-button"
+          type="button"
+          aria-haspopup="dialog"
+          title="Create a new issue (Ctrl/Cmd+N)"
+        >
+          Create
+        </button>
       </div>
       <div class="header-actions">
         <div
@@ -33,14 +49,28 @@
             aria-label="Toggle dark mode"
           />
         </label>
+        <label class="header-search">
+          <span aria-hidden="true"></span>
+          <input type="search" placeholder="Search" aria-label="Search" />
+        </label>
         <button
-          id="new-issue-btn"
+          class="header-icon header-icon--notifications"
           type="button"
-          aria-haspopup="dialog"
-          title="Create a new issue (Ctrl/Cmd+N)"
+          aria-label="Notifications"
+        ></button>
+        <button
+          class="header-icon header-icon--help"
+          type="button"
+          aria-label="Help"
         >
-          New issue
+          ?
         </button>
+        <button
+          class="header-icon header-icon--settings"
+          type="button"
+          aria-label="Settings"
+        ></button>
+        <span class="header-avatar" aria-label="Current user"></span>
       </div>
     </header>
     <main id="app" class="app-shell" aria-live="polite"></main>
