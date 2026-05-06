@@ -19,6 +19,7 @@ import { createIssueDialog } from './views/issue-dialog.js';
 import { createListView } from './views/list.js';
 import { createTopNav } from './views/nav.js';
 import { createNewIssueDialog } from './views/new-issue-dialog.js';
+import { createReportsView } from './views/reports.js';
 import { createWorkspacePicker } from './views/workspace-picker.js';
 import { createWsClient } from './ws.js';
 
@@ -38,6 +39,7 @@ export function bootstrap(root_element) {
     </section>
     <section id="epics-root" class="route epics" hidden></section>
     <section id="board-root" class="route board" hidden></section>
+    <section id="reports-root" class="route reports" hidden></section>
     <section id="detail-panel" class="route detail" hidden></section>
   `;
   render(shell, root_element);
@@ -50,12 +52,14 @@ export function bootstrap(root_element) {
   const epics_root = document.getElementById('epics-root');
   /** @type {HTMLElement|null} */
   const board_root = document.getElementById('board-root');
+  /** @type {HTMLElement|null} */
+  const reports_root = document.getElementById('reports-root');
 
   /** @type {HTMLElement|null} */
   const list_mount = document.getElementById('list-panel');
   /** @type {HTMLElement|null} */
   const detail_mount = document.getElementById('detail-panel');
-  if (list_mount && issues_root && epics_root && board_root && detail_mount) {
+  if (list_mount && issues_root && epics_root && board_root && reports_root && detail_mount) {
     /** @type {HTMLElement|null} */
     const header_loading = document.getElementById('header-loading');
     const activity = createActivityIndicator(header_loading);
@@ -394,7 +398,8 @@ export function bootstrap(root_element) {
       if (
         raw_view === 'issues' ||
         raw_view === 'epics' ||
-        raw_view === 'board'
+        raw_view === 'board' ||
+        raw_view === 'reports'
       ) {
         last_view = raw_view;
       }
@@ -646,6 +651,7 @@ export function bootstrap(root_element) {
       sub_issue_stores,
       transport
     );
+    const reports_view = createReportsView(reports_root, sub_issue_stores);
     // Preload epics when switching to view
     /**
      * @param {{ selected_id: string | null, view: 'issues'|'epics'|'board', filters: any }} s
@@ -665,6 +671,10 @@ export function bootstrap(root_element) {
     let unsub_board_blocked = null;
     /** @type {null | (() => Promise<void>)} */
     let unsub_board_epics = null;
+    /** @type {null | (() => Promise<void>)} */
+    let unsub_reports = null;
+    /** @type {null | (() => Promise<void>)} */
+    let unsub_reports_closed = null;
 
     // Track in-flight subscriptions to prevent duplicates during rapid view switching
     /** @type {Set<string>} */
@@ -953,6 +963,61 @@ export function bootstrap(root_element) {
           }
         }
       }
+
+      // Reports tab: subscribe to all-issues + closed-issues for full history
+      if (s.view === 'reports') {
+        if (!unsub_reports && !pending_subscriptions.has('tab:reports')) {
+          try {
+            sub_issue_stores.register('tab:reports', { type: 'all-issues' });
+          } catch (err) {
+            log('register reports store failed: %o', err);
+          }
+          pending_subscriptions.add('tab:reports');
+          void subscriptions
+            .subscribeList('tab:reports', { type: 'all-issues' })
+            .then((u) => (unsub_reports = u))
+            .catch((err) => {
+              log('subscribe reports failed: %o', err);
+            })
+            .finally(() => {
+              pending_subscriptions.delete('tab:reports');
+            });
+        }
+        if (!unsub_reports_closed && !pending_subscriptions.has('tab:reports:closed')) {
+          try {
+            sub_issue_stores.register('tab:reports:closed', { type: 'closed-issues' });
+          } catch (err) {
+            log('register reports:closed store failed: %o', err);
+          }
+          pending_subscriptions.add('tab:reports:closed');
+          void subscriptions
+            .subscribeList('tab:reports:closed', { type: 'closed-issues' })
+            .then((u) => (unsub_reports_closed = u))
+            .catch((err) => {
+              log('subscribe reports:closed failed: %o', err);
+            })
+            .finally(() => {
+              pending_subscriptions.delete('tab:reports:closed');
+            });
+        }
+      } else if (unsub_reports) {
+        void unsub_reports().catch(() => {});
+        unsub_reports = null;
+        try {
+          sub_issue_stores.unregister('tab:reports');
+        } catch (err) {
+          log('unregister reports failed: %o', err);
+        }
+        if (unsub_reports_closed) {
+          void unsub_reports_closed().catch(() => {});
+          unsub_reports_closed = null;
+          try {
+            sub_issue_stores.unregister('tab:reports:closed');
+          } catch (err) {
+            log('unregister reports:closed failed: %o', err);
+          }
+        }
+      }
     }
 
     /**
@@ -961,11 +1026,12 @@ export function bootstrap(root_element) {
      * @param {{ selected_id: string | null, view: 'issues'|'epics'|'board', filters: any }} s
      */
     const onRouteChange = (s) => {
-      if (issues_root && epics_root && board_root && detail_mount) {
+      if (issues_root && epics_root && board_root && reports_root && detail_mount) {
         // Underlying route visibility is controlled only by selected view
         issues_root.hidden = s.view !== 'issues';
         epics_root.hidden = s.view !== 'epics';
         board_root.hidden = s.view !== 'board';
+        reports_root.hidden = s.view !== 'reports';
         // detail_mount visibility handled in subscription above
       }
       // Ensure subscriptions for the active tab before loading the view to
@@ -976,6 +1042,9 @@ export function bootstrap(root_element) {
       }
       if (!s.selected_id && s.view === 'board') {
         void board_view.load();
+      }
+      if (!s.selected_id && s.view === 'reports') {
+        reports_view.load();
       }
       window.localStorage.setItem('beads-ui.view', s.view);
     };

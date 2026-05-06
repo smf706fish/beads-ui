@@ -153,17 +153,6 @@ a {
   line-height: 1;
   margin: 0;
 }
-.app-title::before {
-  content: '';
-  display: inline-block;
-  width: 26px;
-  height: 26px;
-  border-radius: 6px 6px 12px 6px;
-  background:
-    linear-gradient(135deg, transparent 45%, #2684ff 46%),
-    linear-gradient(225deg, #0c66e4 0 55%, #4c9aff 56%);
-  transform: rotate(45deg);
-}
 
 .app-switcher {
   display: grid;
@@ -1411,8 +1400,7 @@ input.inline-edit:focus {
 
 /* Board view styles */
 .jira-board-shell {
-  display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  display: block;
   height: 100%;
   overflow: hidden;
   background: #fff;
@@ -1649,15 +1637,16 @@ input.inline-edit:focus {
 
 .jira-board-main {
   min-width: 0;
-  min-height: 0;
+  height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
   background: #fff;
+  width: 100%;
 }
 
 .jira-board-content {
   min-width: 0;
-  padding: 30px 0 32px 40px;
+  padding: 24px 32px 32px;
 }
 
 .jira-breadcrumbs {
@@ -1971,7 +1960,7 @@ input.inline-edit:focus {
 }
 
 .board-column__body {
-  padding: 0 9px 22px;
+  padding: 4px 9px 22px;
   overflow: visible;
   display: flex;
   flex-direction: column;
@@ -2791,24 +2780,27 @@ html[data-theme='dark'] {
 
 /* --- Delete Issue Button --- */
 .delete-issue-btn {
-  position: relative;
-  background: transparent;
-  border: 1px solid transparent;
+  background: #c62828;
+  border: none;
   border-radius: 4px;
-  padding: 4px 6px;
+  padding: 8px 16px;
   cursor: pointer;
-  color: #c62828;
-  transition:
-    background 0.15s,
-    border-color 0.15s;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
 }
 .delete-issue-btn:hover {
-  background: rgba(198, 40, 40, 0.1);
-  border-color: rgba(198, 40, 40, 0.3);
+  background: #b71c1c;
 }
 .delete-issue-btn:focus-visible {
   outline: 2px solid #c62828;
   outline-offset: 2px;
+}
+
+.detail-delete-zone {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
 }
 .delete-issue-btn svg {
   width: 16px;
@@ -3300,6 +3292,14 @@ html[data-theme='dark'] {
   background: transparent;
   box-shadow: none;
   outline: 0;
+}
+
+#detail-root .description .jira-description-editing {
+  user-select: text;
+  cursor: text;
+  outline: none;
+  white-space: pre-wrap;
+  min-height: 60px;
 }
 
 #detail-root .description .md p:first-child {
@@ -3905,4 +3905,145 @@ html[data-theme='dark'] {
 .dep-count:hover,
 .dependent-count:hover {
   color: var(--fg);
+}
+
+/* Reports view */
+.reports-view {
+  padding: 32px 40px;
+}
+
+.reports-title {
+  margin: 0 0 20px;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.reports-section-title {
+  margin: 32px 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.reports-subtitle {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.reports-stats {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.reports-stat {
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 120px;
+}
+
+.reports-stat__value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.reports-stat__label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.reports-legend {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.reports-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reports-legend__swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.reports-legend__swatch--closed {
+  background: #1e88e5;
+}
+
+.reports-legend__swatch--created {
+  background: #e0e0e0;
+}
+
+.reports-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0;
+}
+
+.reports-bar-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+
+.reports-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 100%;
+  justify-content: center;
+}
+
+.reports-bar {
+  width: 16px;
+  min-height: 0;
+  border-radius: 3px 3px 0 0;
+  position: relative;
+  transition: height 0.2s;
+}
+
+.reports-bar--closed {
+  background: #1e88e5;
+}
+
+.reports-bar--created {
+  background: #e0e0e0;
+}
+
+.reports-bar--effort {
+  background: #43a047;
+  width: 28px;
+}
+
+.reports-bar__count {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.reports-bar-label {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
 }

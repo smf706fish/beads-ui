@@ -142,13 +142,13 @@ describe('views/detail edits', () => {
     // Enter edit mode
     const md = /** @type {HTMLDivElement} */ (mount.querySelector('.md'));
     md.click();
-    const ta = /** @type {HTMLTextAreaElement} */ (
-      mount.querySelector('textarea')
+    const editable = /** @type {HTMLElement} */ (
+      mount.querySelector('.jira-description-editing')
     );
     const btn = /** @type {HTMLButtonElement} */ (
       mount.querySelector('.editable-actions button')
     );
-    ta.value = 'New D';
+    editable.innerText = 'New D';
     btn.click();
     await Promise.resolve();
     // Toast appears

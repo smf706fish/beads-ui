@@ -127,17 +127,8 @@ export function createBoardView(
   function template() {
     return html`
       <div class="panel__body jira-board-shell">
-        ${sidebarTemplate()}
         <main class="jira-board-main">
           <div class="jira-board-content">
-            <div class="jira-breadcrumbs" aria-label="Breadcrumb">
-              <span>Projects</span>
-              <span aria-hidden="true">/</span>
-              <span>Beyond Gravity</span>
-            </div>
-            <div class="jira-board-title-row">
-              <h2>Board</h2>
-            </div>
             <div class="jira-board-toolbar" aria-label="Board filters">
               <label class="jira-board-search">
                 <span aria-hidden="true"></span>
@@ -162,56 +153,6 @@ export function createBoardView(
           </div>
         </main>
       </div>
-    `;
-  }
-
-  function sidebarTemplate() {
-    return html`
-      <aside class="jira-sidebar" aria-label="Project navigation">
-        <div class="jira-project">
-          <div class="jira-project__icon" aria-hidden="true"></div>
-          <div>
-            <div class="jira-project__name">Beyond Gravity</div>
-            <div class="jira-project__type">Software project</div>
-          </div>
-        </div>
-        <nav class="jira-sidebar-nav" aria-label="Project">
-          <div class="jira-sidebar-section">PLANNING</div>
-          ${sidebarItemTemplate('roadmap', 'Roadmap', false)}
-          ${sidebarItemTemplate('backlog', 'Backlog', false)}
-          ${sidebarItemTemplate('board', 'Board', true)}
-          ${sidebarItemTemplate('reports', 'Reports', false)}
-          ${sidebarItemTemplate('issues', 'Issues', false)}
-          <div class="jira-sidebar-section">DEVELOPMENT</div>
-          ${sidebarItemTemplate('code', 'Code', false)}
-          ${sidebarItemTemplate('security', 'Security', false)}
-          ${sidebarItemTemplate('releases', 'Releases', false)}
-        </nav>
-        <div class="jira-sidebar-footer">
-          ${sidebarItemTemplate('settings', 'Project settings', false)}
-        </div>
-      </aside>
-    `;
-  }
-
-  /**
-   * @param {string} icon
-   * @param {string} label
-   * @param {boolean} active
-   */
-  function sidebarItemTemplate(icon, label, active) {
-    return html`
-      <a
-        class="jira-sidebar-item ${active ? 'is-active' : ''}"
-        href="#/board"
-        aria-current=${active ? 'page' : 'false'}
-      >
-        <span
-          class="jira-sidebar-item__icon jira-sidebar-item__icon--${icon}"
-          aria-hidden="true"
-        ></span>
-        <span>${label}</span>
-      </a>
     `;
   }
 
@@ -270,6 +211,25 @@ export function createBoardView(
   }
 
   /**
+   * Return a consistent color for an epic title.
+   *
+   * @param {string} title
+   * @returns {string}
+   */
+  function epicColor(title) {
+    const colors = [
+      '#e53935', '#d81b60', '#8e24aa', '#5e35b1', '#3949ab',
+      '#1e88e5', '#00acc1', '#00897b', '#43a047', '#7cb342',
+      '#f4511e', '#6d4c41'
+    ];
+    let hash = 5381;
+    for (let i = 0; i < title.length; i++) {
+      hash = ((hash * 33) ^ title.charCodeAt(i)) >>> 0;
+    }
+    return colors[hash % colors.length];
+  }
+
+  /**
    * @param {IssueLite} it
    */
   function cardTemplate(it) {
@@ -293,6 +253,7 @@ export function createBoardView(
         ${epic_title
           ? html`<span
               class="jira-card-label jira-card-label--epic"
+              style="background: ${epicColor(epic_title)}"
               title=${epic_title}
             >
               ${epic_title}

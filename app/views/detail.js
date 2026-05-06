@@ -925,19 +925,19 @@ export function createDetailView(
     if (!current || pending) {
       return;
     }
-    const ta = /** @type {HTMLTextAreaElement|null} */ (
-      mount_element.querySelector('#detail-root textarea')
+    const el = /** @type {HTMLElement|null} */ (
+      mount_element.querySelector('#detail-root .jira-description-editing')
     );
     const prev = current.description || '';
-    const next = ta ? ta.value : '';
+    const next = el ? el.innerText : '';
     if (next === prev) {
       edit_desc = false;
       doRender();
       return;
     }
     pending = true;
-    if (ta) {
-      ta.disabled = true;
+    if (el) {
+      el.contentEditable = 'false';
     }
     try {
       log('save description %s', String(current?.id || ''));
@@ -964,6 +964,9 @@ export function createDetailView(
   const onDescCancel = () => {
     edit_desc = false;
     doRender();
+  };
+  const onDescBlur = () => {
+    // no-op: let user explicitly save/cancel
   };
 
   // Design inline edit handlers (same UX as Description)
@@ -1403,9 +1406,6 @@ export function createDetailView(
    */
   function detailTemplate(issue) {
     const issue_type = String(/** @type {any} */ (issue).issue_type || 'task');
-    const reporter = String(
-      /** @type {any} */ (issue).reporter || issue.assignee || ''
-    );
     const created_at = formatIssueDate(issueTimestamp(issue, 'created'));
     const updated_at = formatIssueDate(issueTimestamp(issue, 'updated'));
     const epic_title = epicTitleForIssue(issue);
@@ -1483,12 +1483,14 @@ export function createDetailView(
     const desc_block = edit_desc
       ? html`<section class="description jira-section">
           <h3 class="jira-section-title">Description</h3>
-          <textarea
+          <div
+            class="md jira-description-read jira-description-editing"
+            contenteditable="true"
+            role="textbox"
+            aria-label="Edit description"
             @keydown=${onDescKeydown}
-            .value=${issue.description || ''}
-            rows="8"
-            style="width:100%"
-          ></textarea>
+            @blur=${onDescBlur}
+          >${issue.description || ''}</div>
           <div class="editable-actions">
             <button @click=${onDescSave}>Save</button>
             <button @click=${onDescCancel}>Cancel</button>
@@ -1749,93 +1751,24 @@ export function createDetailView(
             ${jiraIssueIcon(issue_type)}
             <span class="jira-breadcrumb-id">${issue.id}</span>
           </div>
-          <div class="jira-action-bar" aria-label="Issue actions">
-            <button type="button" class="jira-icon-button jira-icon-button--lock" aria-label="Lock issue"></button>
-            <button type="button" class="jira-icon-button jira-icon-button--eye" aria-label="Watch issue">
-              <span>1</span>
-            </button>
-            <button type="button" class="jira-icon-button jira-icon-button--thumb" aria-label="Vote for issue"></button>
-            <button type="button" class="jira-icon-button jira-icon-button--share" aria-label="Share issue"></button>
-            <button
-              class="delete-issue-btn jira-icon-button jira-icon-button--more"
-              title="Delete issue"
-              aria-label="Delete issue"
-              @click=${onDeleteClick}
-            ></button>
-          </div>
         </div>
         <div class="detail-layout">
           <div class="detail-main">
             ${title_zone} ${desc_block} ${design_block} ${notes_block}
-            ${accept_block} ${comments_block}
+            ${accept_block}
+            <div class="detail-delete-zone">
+              <button
+                class="delete-issue-btn"
+                @click=${onDeleteClick}
+              >Delete</button>
+            </div>
           </div>
           <div class="detail-side">
             <div class="jira-status-control">${status_select}</div>
             <div class="props-card jira-detail-card">
               <div class="props-card__header">
                 <div class="props-card__title">Details</div>
-                <button type="button" class="jira-collapse-button" aria-label="Collapse Details"></button>
               </div>
-                <div class="prop assignee">
-                  <div class="label">Assignee</div>
-                  <div class="value">
-                    ${
-                      edit_assignee
-                        ? html`<input
-                              type="text"
-                              aria-label="Edit assignee"
-                              .value=${
-                                /** @type {any} */ (issue).assignee || ''
-                              }
-                              size=${Math.min(
-                                40,
-                                Math.max(12, (issue.assignee || '').length + 3)
-                              )}
-                              @keydown=${
-                                /** @param {KeyboardEvent} e */ (e) => {
-                                  if (e.key === 'Escape') {
-                                    e.preventDefault();
-                                    onAssigneeCancel();
-                                  } else if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    onAssigneeSave();
-                                  }
-                                }
-                              }
-                            />
-                            <button
-                              class="btn"
-                              style="margin-left:6px"
-                              @click=${onAssigneeSave}
-                            >
-                              Save
-                            </button>
-                            <button
-                              class="btn"
-                              style="margin-left:6px"
-                              @click=${onAssigneeCancel}
-                            >
-                              Cancel
-                            </button>`
-                        : html`${(() => {
-                            const raw = issue.assignee || '';
-                            const has = raw.trim().length > 0;
-                            const text = has ? raw : 'Unassigned';
-                            const cls = has ? 'editable' : 'editable muted';
-                            return html`${userAvatar(raw)}
-                              <span
-                                class=${cls}
-                                tabindex="0"
-                                role="button"
-                                aria-label="Edit assignee"
-                                @click=${onAssigneeSpanClick}
-                                @keydown=${onAssigneeKeydown}
-                                >${text}</span
-                              >`;
-                          })()}`
-                    }
-                  </div>
-                </div>
                 ${labels_block}
                 <div class="prop">
                   <div class="label">Epic</div>
@@ -1861,17 +1794,6 @@ export function createDetailView(
                     ${priority_select}
                   </div>
                 </div>
-                <div class="prop">
-                  <div class="label">Fix versions</div>
-                  <div class="value"><span class="jira-none">None</span></div>
-                </div>
-                <div class="prop reporter">
-                  <div class="label">Reporter</div>
-                  <div class="value">
-                    ${userAvatar(reporter)}
-                    <span>${personName(reporter)}</span>
-                  </div>
-                </div>
                 <div class="prop jira-hidden-type">
                   <div class="label">Type</div>
                   <div class="value">${createTypeBadge(issue_type)}</div>
@@ -1888,10 +1810,6 @@ export function createDetailView(
               <div class="jira-detail-meta">
                 <div>Created ${created_at}</div>
                 <div>Updated ${updated_at}</div>
-                <button type="button" class="jira-configure-button">
-                  <span aria-hidden="true"></span>
-                  Configure
-                </button>
               </div>
             </div>
           </div>
@@ -1909,6 +1827,7 @@ export function createDetailView(
       renderPlaceholder(current_id ? 'Loading…' : 'No issue selected');
       return;
     }
+    document.title = current.title ? `${current.title} — Beads` : 'Beads';
     render(detailTemplate(current), mount_element);
   }
 
@@ -2101,6 +2020,7 @@ export function createDetailView(
       }
     },
     clear() {
+      document.title = 'Beads';
       renderPlaceholder('Select an issue to view details');
     },
     destroy() {

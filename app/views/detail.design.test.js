@@ -36,7 +36,7 @@ describe('detail view design section', () => {
     );
     expect(main).toBeTruthy();
     const children = Array.from(main.children).filter(
-      (el) => !el.classList.contains('detail-title')
+      (el) => !el.classList.contains('detail-title') && !el.classList.contains('detail-delete-zone')
     );
     const names = children.map((el) => {
       if (el.classList.contains('design')) {
@@ -57,8 +57,7 @@ describe('detail view design section', () => {
       'description',
       'design',
       'notes',
-      'acceptance',
-      'comments'
+      'acceptance'
     ]);
     // Heading text for acceptance should be updated
     const accTitle = mount.querySelector('.acceptance .props-card__title');
