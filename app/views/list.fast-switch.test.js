@@ -93,7 +93,7 @@ describe('list view — fast filter switches', () => {
 
     // Simulate quick switch: ready -> in_progress while snapshots arrive out-of-order
     toggleFilter(mount, 0, 'Ready');
-    toggleFilter(mount, 0, 'In progress');
+    toggleFilter(mount, 0, 'IN PROGRESS');
 
     const inProg = [
       {

@@ -1331,7 +1331,6 @@ export function createDetailView(
                       </button>
                     </div>
                     <div class="jira-child-row__title">${item.title || ''}</div>
-                    ${userAvatar(/** @type {any} */ (item).assignee)}
                     <button
                       type="button"
                       class=${`jira-child-status is-${item.status || 'open'}`}
@@ -1385,7 +1384,6 @@ export function createDetailView(
                       </button>
                     </div>
                     <div class="jira-child-row__title">${item.title || ''}</div>
-                    ${userAvatar(/** @type {any} */ (item).assignee)}
                     <button
                       type="button"
                       class=${`jira-child-status is-${item.status || 'open'}`}

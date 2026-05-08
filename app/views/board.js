@@ -124,6 +124,174 @@ export function createBoardView(
     return sorted;
   }
 
+  // --- Sticky note state (localStorage) ---
+  const STICKY_KEY = 'beads-sticky-items';
+
+  function loadStickyItems() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(STICKY_KEY) || '[]');
+      // Ensure each item has the expected shape
+      return raw.map((it) => ({
+        text: typeof it.text === 'string' ? it.text : '',
+        done: it.done === true
+      }));
+    } catch { return []; }
+  }
+
+  function saveStickyItems(items) {
+    localStorage.setItem(STICKY_KEY, JSON.stringify(items));
+  }
+
+  /** @type {Array<{text: string, done: boolean}>} */
+  let sticky_items = loadStickyItems();
+
+  /** Timestamp of last user interaction with sticky items */
+  let sticky_dirty_ts = 0;
+
+  // Cross-tab sync: reload sticky items when another tab writes to localStorage
+  window.addEventListener('storage', (ev) => {
+    if (ev.key === STICKY_KEY) {
+      sticky_items = loadStickyItems();
+      doRender();
+    }
+  });
+
+  /** @type {number|null} */
+  let sticky_drag_index = null;
+
+  function onStickyToggle(index) {
+    sticky_items = sticky_items.map((it, i) =>
+      i === index ? { ...it, done: !it.done } : it
+    );
+    sticky_dirty_ts = Date.now();
+    saveStickyItems(sticky_items);
+    doRender();
+  }
+
+  function onStickyRemove(index) {
+    sticky_items = sticky_items.filter((_, i) => i !== index);
+    sticky_dirty_ts = Date.now();
+    saveStickyItems(sticky_items);
+    doRender();
+  }
+
+  function onStickyItemKeydown(ev, index) {
+    const input = /** @type {HTMLInputElement} */ (ev.currentTarget);
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      // Save current text, insert new item below
+      sticky_items = sticky_items.map((it, i) =>
+        i === index ? { ...it, text: input.value } : it
+      );
+      sticky_items.splice(index + 1, 0, { text: '', done: false });
+      sticky_dirty_ts = Date.now();
+      saveStickyItems(sticky_items);
+      doRender();
+      // Focus the new item
+      requestAnimationFrame(() => {
+        const items = mount_element.querySelectorAll('.sticky-column__text-input');
+        if (items[index + 1]) items[index + 1].focus();
+      });
+    } else if (ev.key === 'Backspace' && input.value === '' && sticky_items.length > 1) {
+      ev.preventDefault();
+      sticky_items = sticky_items.filter((_, i) => i !== index);
+      sticky_dirty_ts = Date.now();
+      saveStickyItems(sticky_items);
+      doRender();
+      requestAnimationFrame(() => {
+        const items = mount_element.querySelectorAll('.sticky-column__text-input');
+        const focus_i = Math.max(0, index - 1);
+        if (items[focus_i]) items[focus_i].focus();
+      });
+    }
+  }
+
+  function onStickyItemInput(ev, index) {
+    const input = /** @type {HTMLTextAreaElement} */ (ev.currentTarget);
+    sticky_items = sticky_items.map((it, i) =>
+      i === index ? { ...it, text: input.value } : it
+    );
+    sticky_dirty_ts = Date.now();
+    saveStickyItems(sticky_items);
+    autoResizeTextarea(input);
+  }
+
+  function autoResizeTextarea(el) {
+    el.style.height = '0';
+    el.style.height = el.scrollHeight + 'px';
+  }
+
+  function autoResizeAllTextareas() {
+    const els = mount_element.querySelectorAll('.sticky-column__text-input');
+    els.forEach((el) => autoResizeTextarea(el));
+  }
+
+  function onStickyDragStart(ev, index) {
+    sticky_drag_index = index;
+    ev.dataTransfer.effectAllowed = 'move';
+    ev.currentTarget.classList.add('is-dragging');
+  }
+
+  function onStickyDragEnd(ev) {
+    sticky_drag_index = null;
+    ev.currentTarget.classList.remove('is-dragging');
+  }
+
+  function onStickyDragOver(ev, index) {
+    ev.preventDefault();
+    if (sticky_drag_index === null || sticky_drag_index === index) return;
+    const item = sticky_items[sticky_drag_index];
+    const filtered = sticky_items.filter((_, i) => i !== sticky_drag_index);
+    filtered.splice(index, 0, item);
+    sticky_items = filtered;
+    sticky_drag_index = index;
+    sticky_dirty_ts = Date.now();
+    saveStickyItems(sticky_items);
+    doRender();
+  }
+
+  function stickyColumnTemplate() {
+    // Re-sync from localStorage if no recent user interaction.
+    // This guards against stale in-memory state after navigation or reconnect.
+    if (Date.now() - sticky_dirty_ts > 500) {
+      sticky_items = loadStickyItems();
+    }
+    // Ensure at least one empty item to type into
+    if (sticky_items.length === 0) {
+      sticky_items = [{ text: '', done: false }];
+      saveStickyItems(sticky_items);
+    }
+    return html`
+      <section class="board-column sticky-column">
+        <header class="board-column__header">
+          <div class="board-column__title">
+            <span class="board-column__title-text">${new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' })}</span>
+          </div>
+        </header>
+        <div class="sticky-column__body">
+          <ul class="sticky-column__list">
+            ${sticky_items.map((item, i) => html`
+              <li class="sticky-column__item ${item.done ? 'is-done' : ''}"
+                  draggable="true"
+                  @dragstart=${(ev) => onStickyDragStart(ev, i)}
+                  @dragend=${onStickyDragEnd}
+                  @dragover=${(ev) => onStickyDragOver(ev, i)}>
+                <span class="sticky-column__drag-handle" aria-hidden="true">⠿</span>
+                <input type="checkbox" .checked=${item.done} @change=${() => onStickyToggle(i)} />
+                <textarea class="sticky-column__text-input" rows="1"
+                  .value=${item.text}
+                  placeholder="…"
+                  @keydown=${(ev) => onStickyItemKeydown(ev, i)}
+                  @input=${(ev) => onStickyItemInput(ev, i)}></textarea>
+                <button class="sticky-column__remove" @click=${() => onStickyRemove(i)} aria-label="Remove">×</button>
+              </li>
+            `)}
+          </ul>
+        </div>
+      </section>
+    `;
+  }
+
   function template() {
     return html`
       <div class="panel__body jira-board-shell">
@@ -149,6 +317,7 @@ export function createBoardView(
                 applyFilter(filterBySearch(list_in_progress))
               )}
               ${columnTemplate('DONE', 'closed-col', applyFilter(filterBySearch(list_closed)))}
+              ${stickyColumnTemplate()}
             </div>
           </div>
         </main>
@@ -260,7 +429,7 @@ export function createBoardView(
             </span>`
           : ''}
         <div class="board-card__meta">
-          <span class="jira-issue-icon" aria-hidden="true"></span>
+          <span class="jira-issue-icon jira-issue-icon--${String(it.issue_type || 'task').toLowerCase()}" aria-hidden="true"></span>
           ${createIssueIdRenderer(it.id, { class_name: 'mono' })}
           <span class="board-card__age">${age}</span>
           ${pri ? html`<span class="board-card__priority">${pri}</span>` : ''}
@@ -421,6 +590,7 @@ export function createBoardView(
   function doRender() {
     render(template(), mount_element);
     postRenderEnhance();
+    autoResizeAllTextareas();
   }
 
   /**

@@ -22,11 +22,11 @@ export function createStatusBadge(status) {
 function labelForStatus(s) {
   switch (s) {
     case 'open':
-      return 'Open';
+      return 'TO DO';
     case 'in_progress':
-      return 'In progress';
+      return 'IN PROGRESS';
     case 'closed':
-      return 'Closed';
+      return 'DONE';
     default:
       return 'Unknown';
   }

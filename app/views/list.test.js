@@ -169,12 +169,12 @@ describe('views/list', () => {
     );
 
     // Filter by status using dropdown checkbox
-    toggleFilter(mount, 0, 'Open');
+    toggleFilter(mount, 0, 'TO DO');
     await Promise.resolve();
     expect(mount.querySelectorAll('tr.issue-row').length).toBe(1);
 
     // Clear status filter and search
-    toggleFilter(mount, 0, 'Open'); // toggle off to show all
+    toggleFilter(mount, 0, 'TO DO'); // toggle off to show all
     await Promise.resolve();
     input.value = 'ga';
     input.dispatchEvent(new Event('input'));
@@ -614,7 +614,7 @@ describe('views/list', () => {
     expect(items[0].id).toBe('UI-2');
 
     // Controls reflect persisted filters
-    expect(isFilterChecked(mount, 0, 'Open')).toBe(true);
+    expect(isFilterChecked(mount, 0, 'TO DO')).toBe(true);
     const input = /** @type {HTMLInputElement} */ (
       mount.querySelector('input[type="search"]')
     );
@@ -647,7 +647,7 @@ describe('views/list', () => {
     await view.load();
 
     // Click Open checkbox to select it
-    toggleFilter(mount, 0, 'Open');
+    toggleFilter(mount, 0, 'TO DO');
     await Promise.resolve();
 
     // Should show only open issues
@@ -657,7 +657,7 @@ describe('views/list', () => {
     expect(rows).toEqual(['UI-1']);
 
     // Click In progress checkbox to add it (multi-select)
-    toggleFilter(mount, 0, 'In progress');
+    toggleFilter(mount, 0, 'IN PROGRESS');
     await Promise.resolve();
 
     // Should show both open and in_progress
@@ -740,12 +740,12 @@ describe('views/list', () => {
     expect(mount.querySelectorAll('tr.issue-row').length).toBe(2);
 
     // Click Open checkbox to filter
-    toggleFilter(mount, 0, 'Open');
+    toggleFilter(mount, 0, 'TO DO');
     await Promise.resolve();
     expect(mount.querySelectorAll('tr.issue-row').length).toBe(1);
 
     // Click Open checkbox again to deselect - should show all
-    toggleFilter(mount, 0, 'Open');
+    toggleFilter(mount, 0, 'TO DO');
     await Promise.resolve();
     expect(mount.querySelectorAll('tr.issue-row').length).toBe(2);
   });

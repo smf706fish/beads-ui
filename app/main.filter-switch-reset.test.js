@@ -99,7 +99,7 @@ describe('issues view — store resets on spec change', () => {
     await Promise.resolve();
 
     // Switch to in_progress using dropdown checkbox
-    toggleFilter(0, 'In progress');
+    toggleFilter(0, 'IN PROGRESS');
     await Promise.resolve();
 
     // Now deliver a snapshot for the new spec with a LOWER revision

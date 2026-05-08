@@ -14,12 +14,12 @@ export const STATUSES = ['open', 'in_progress', 'closed'];
 export function statusLabel(status) {
   switch ((status || '').toString()) {
     case 'open':
-      return 'Open';
+      return 'TO DO';
     case 'in_progress':
-      return 'In progress';
+      return 'IN PROGRESS';
     case 'closed':
-      return 'Closed';
+      return 'DONE';
     default:
-      return (status || '').toString() || 'Open';
+      return (status || '').toString() || 'TO DO';
   }
 }

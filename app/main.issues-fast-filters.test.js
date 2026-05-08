@@ -117,7 +117,7 @@ describe('issues view — fast filter switching', () => {
     // all -> ready
     toggleFilter(0, 'Ready');
     // ready -> in_progress (fast)
-    toggleFilter(0, 'In progress');
+    toggleFilter(0, 'IN PROGRESS');
     // Allow store subscriptions and sub_issue_stores.register to run
     await Promise.resolve();
     await Promise.resolve();
